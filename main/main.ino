@@ -1,6 +1,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <EEPROM.h>
+#include <DHT.h>
 
 /* Параметри запуску */
 const char* ssid = "example"; // Ім'я мережі (якщо connectToExistingNetwork = true, то це ім'я мережі, до якої підключаємося)
@@ -21,15 +22,24 @@ const char* footerText = "Курсова робота здобувача осв�
 
 #define SOIL_SENSOR_PIN 14 // GPIO14 (D5) -- Датчик вологості ґрунту
 #define LIGHT_SENSOR_PIN A0 // A0 -- Датчик освітленості
+#define DHT_PIN 12 // GPIO12 (D6) -- Пін для підключення датчика DHT11
+
+#define DHTTYPE DHT11 // Визначення типу датчика
+
+DHT dht(DHT_PIN, DHTTYPE); // Ініціалізація датчика DHT11
 
 ESP8266WebServer server(80); 
 
 // Адреса в EEPROM для зберігання значень порогів
-#define EEPROM_SIZE 4
+#define EEPROM_SIZE 8
 #define LIGHT_THRESHOLD_ADDR 0
+#define TEMP_THRESHOLD_ADDR 2
+#define HUMIDITY_THRESHOLD_ADDR 4
 
-// Значення порогу освітленості
+// Значення порогів
 int lightThreshold;
+int tempThreshold;
+int humidityThreshold;
 bool manualMode = false;
 
 unsigned long previousMillis = 0;
@@ -41,6 +51,10 @@ void setup() {
   EEPROM.begin(EEPROM_SIZE);
   lightThreshold = EEPROM.read(LIGHT_THRESHOLD_ADDR) + (EEPROM.read(LIGHT_THRESHOLD_ADDR + 1) << 8);
   if (lightThreshold == 0xFFFF) lightThreshold = 750; // Встановити значення за замовчуванням, якщо EEPROM порожній
+  tempThreshold = EEPROM.read(TEMP_THRESHOLD_ADDR) + (EEPROM.read(TEMP_THRESHOLD_ADDR + 1) << 8);
+  if (tempThreshold == 0xFFFF) tempThreshold = 25; // Встановити значення за замовчуванням, якщо EEPROM порожній
+  humidityThreshold = EEPROM.read(HUMIDITY_THRESHOLD_ADDR) + (EEPROM.read(HUMIDITY_THRESHOLD_ADDR + 1) << 8);
+  if (humidityThreshold == 0xFFFF) humidityThreshold = 60; // Встановити значення за замовчуванням, якщо EEPROM порожній
 
   pinMode(RELAY1_PIN, OUTPUT);
   pinMode(RELAY2_PIN, OUTPUT);
@@ -49,6 +63,8 @@ void setup() {
 
   pinMode(SOIL_SENSOR_PIN, INPUT);
   pinMode(LIGHT_SENSOR_PIN, INPUT);
+
+  dht.begin(); // Запуск датчика DHT11
 
   /* Вимкнути всі реле при запуску */ 
   digitalWrite(RELAY1_PIN, HIGH); // Освітлення вимкнено
@@ -90,11 +106,17 @@ void loop() {
     /* Зчитування даних з датчиків */
     int lightLevel = analogRead(LIGHT_SENSOR_PIN);
     int soilMoisture = digitalRead(SOIL_SENSOR_PIN);
+    float temperature = dht.readTemperature();
+    float humidity = dht.readHumidity();
 
     Serial.print("Light Level: ");
     Serial.println(lightLevel);
     Serial.print("Soil Moisture: ");
     Serial.println(soilMoisture);
+    Serial.print("Temperature: ");
+    Serial.println(temperature);
+    Serial.print("Humidity: ");
+    Serial.println(humidity);
 
     /* Управління освітленням */
     if (lightLevel < lightThreshold) {
@@ -108,6 +130,20 @@ void loop() {
       digitalWrite(RELAY4_PIN, LOW); // Увімкнути полив
     } else {
       digitalWrite(RELAY4_PIN, HIGH); // Вимкнути полив
+    }
+
+    /* Управління обігрівом */
+    if (temperature < tempThreshold) {
+      digitalWrite(RELAY3_PIN, LOW); // Увімкнути обігрів
+    } else {
+      digitalWrite(RELAY3_PIN, HIGH); // Вимкнути обігрів
+    }
+
+    /* Управління вентиляцією */
+    if (humidity > humidityThreshold) {
+      digitalWrite(RELAY2_PIN, LOW); // Увімкнути вентиляцію
+    } else {
+      digitalWrite(RELAY2_PIN, HIGH); // Вимкнути вентиляцію
     }
   }
 }
@@ -149,7 +185,9 @@ void handleRoot() {
   server.sendContent("<div id='monitoring' class='tab active'>");
   server.sendContent("<h2>Дані з датчиків</h2>");
   server.sendContent("<div class='status'><p>Освітленість: <span id='lightLevel'></span></p>");
-  server.sendContent("<p>Вологість ґрунту: <span id='soilMoisture'></span></p></div>");
+  server.sendContent("<p>Вологість ґрунту: <span id='soilMoisture'></span></p>");
+  server.sendContent("<p>Температура: <span id='temperature'></span></p>");
+  server.sendContent("<p>Вологість: <span id='humidity'></span></p></div>");
   server.sendContent("<h2>Стан реле</h2>");
   server.sendContent("<div class='status'><p>Освітлення: <span id='relay1'></span></p>");
   server.sendContent("<p>Вентиляція: <span id='relay2'></span></p>");
@@ -179,6 +217,8 @@ void handleRoot() {
   server.sendContent("<h2>Конфігурація</h2>");
   server.sendContent("<form action='/update' method='POST'>");
   server.sendContent("Поріг освітленості: <input type='number' name='lightThreshold' value='" + String(lightThreshold) + "'><br>");
+  server.sendContent("Поріг температури: <input type='number' name='tempThreshold' value='" + String(tempThreshold) + "'><br>");
+  server.sendContent("Поріг вологості: <input type='number' name='humidityThreshold' value='" + String(humidityThreshold) + "'><br>");
   server.sendContent("<input type='submit' value='Оновити'>");
   server.sendContent("</form>");
   server.sendContent("</div>");
@@ -209,6 +249,8 @@ void handleRoot() {
   server.sendContent("fetch('/status').then(response => response.json()).then(data => {");
   server.sendContent("document.getElementById('lightLevel').innerText = data.lightLevel;");
   server.sendContent("document.getElementById('soilMoisture').innerText = data.soilMoisture ? 'Сухий' : 'Вологий';");
+  server.sendContent("document.getElementById('temperature').innerText = data.temperature + '°C';");
+  server.sendContent("document.getElementById('humidity').innerText = data.humidity + '%';");
   server.sendContent("document.getElementById('relay1').innerText = data.relay1 ? 'Увімкнено' : 'Вимкнено';");
   server.sendContent("document.getElementById('relay2').innerText = data.relay2 ? 'Увімкнено' : 'Вимкнено';");
   server.sendContent("document.getElementById('relay3').innerText = data.relay3 ? 'Увімкнено' : 'Вимкнено';");
@@ -239,14 +281,24 @@ void handleRoot() {
   server.client().stop();
 }
 
-/* Обробник оновлення порогу освітленості */ 
+/* Обробник оновлення порогу освітленості та даних з DHT11 */ 
 void handleUpdate() {
   if (server.hasArg("lightThreshold")) {
     lightThreshold = server.arg("lightThreshold").toInt();
     EEPROM.write(LIGHT_THRESHOLD_ADDR, lightThreshold & 0xFF);
     EEPROM.write(LIGHT_THRESHOLD_ADDR + 1, (lightThreshold >> 8) & 0xFF);
-    EEPROM.commit();
   }
+  if (server.hasArg("tempThreshold")) {
+    tempThreshold = server.arg("tempThreshold").toInt();
+    EEPROM.write(TEMP_THRESHOLD_ADDR, tempThreshold & 0xFF);
+    EEPROM.write(TEMP_THRESHOLD_ADDR + 1, (tempThreshold >> 8) & 0xFF);
+  }
+  if (server.hasArg("humidityThreshold")) {
+    humidityThreshold = server.arg("humidityThreshold").toInt();
+    EEPROM.write(HUMIDITY_THRESHOLD_ADDR, humidityThreshold & 0xFF);
+    EEPROM.write(HUMIDITY_THRESHOLD_ADDR + 1, (humidityThreshold >> 8) & 0xFF);
+  }
+  EEPROM.commit();
   server.sendHeader("Location", "/");
   server.send(303);
 }
@@ -297,6 +349,8 @@ void handleMode() {
 void handleStatus() {
   int lightLevel = analogRead(LIGHT_SENSOR_PIN);
   int soilMoisture = digitalRead(SOIL_SENSOR_PIN);
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
   bool relay1State = digitalRead(RELAY1_PIN);
   bool relay2State = digitalRead(RELAY2_PIN); 
   bool relay3State = digitalRead(RELAY3_PIN);
@@ -305,6 +359,8 @@ void handleStatus() {
   String json = "{";
   json += "\"lightLevel\":" + String(lightLevel) + ",";
   json += "\"soilMoisture\":" + String(soilMoisture) + ",";
+  json += "\"temperature\":" + String(temperature) + ",";
+  json += "\"humidity\":" + String(humidity) + ",";
   json += "\"relay1\":" + String(!relay1State) + ",";
   json += "\"relay2\":" + String(!relay2State) + ",";
   json += "\"relay3\":" + String(!relay3State) + ",";
