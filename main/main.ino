@@ -14,7 +14,7 @@ const bool connectToExistingNetwork = false; // False - Точка доступ�
 
 const char* footerText = "Курсова робота здобувача освіти<br>Мусієнко Олександра, група 3-013<br>";
 
-// Піни для підключення реле та датчиків
+/* Піни для підключення реле та датчиків */
 #define RELAY1_PIN 5  // GPIO5 (D1) -- Освітлення
 #define RELAY2_PIN 4  // GPIO4 (D2) -- Вентиляція
 #define RELAY3_PIN 0  // GPIO0 (D3) -- Обігрів
@@ -30,13 +30,13 @@ DHT dht(DHT_PIN, DHTTYPE); // Ініціалізація датчика DHT11
 
 ESP8266WebServer server(80); 
 
-// Адреса в EEPROM для зберігання значень порогів
+/* Адреса в EEPROM для зберігання значень порогів */
 #define EEPROM_SIZE 8
 #define LIGHT_THRESHOLD_ADDR 0
 #define TEMP_THRESHOLD_ADDR 2
 #define HUMIDITY_THRESHOLD_ADDR 4
 
-// Значення порогів
+/* Значення порогів */
 int lightThreshold;
 int tempThreshold;
 int humidityThreshold;
@@ -110,13 +110,16 @@ void loop() {
     float humidity = dht.readHumidity();
 
     Serial.print("Light Level: ");
-    Serial.println(lightLevel);
+    Serial.print(lightLevel);
+    Serial.println(" lx");
     Serial.print("Soil Moisture: ");
-    Serial.println(soilMoisture);
+    Serial.println(soilMoisture ? "Dry" : "Wet");
     Serial.print("Temperature: ");
-    Serial.println(temperature);
+    Serial.print(temperature);
+    Serial.println(" °C");
     Serial.print("Humidity: ");
-    Serial.println(humidity);
+    Serial.print(humidity);
+    Serial.println(" %");
 
     /* Управління освітленням */
     if (lightLevel < lightThreshold) {
@@ -216,11 +219,18 @@ void handleRoot() {
   server.sendContent("<div id='config' class='tab'>");
   server.sendContent("<h2>Конфігурація</h2>");
   server.sendContent("<form action='/update' method='POST'>");
-  server.sendContent("Поріг освітленості: <input type='number' name='lightThreshold' value='" + String(lightThreshold) + "'><br>");
-  server.sendContent("Поріг температури: <input type='number' name='tempThreshold' value='" + String(tempThreshold) + "'><br>");
-  server.sendContent("Поріг вологості: <input type='number' name='humidityThreshold' value='" + String(humidityThreshold) + "'><br>");
+  server.sendContent("Поріг освітленості: <input type='number' name='lightThreshold' value='" + String(lightThreshold) + "'> lx<br>");
+  server.sendContent("Поріг температури: <input type='number' name='tempThreshold' value='" + String(tempThreshold) + "'> °C<br>");
+  server.sendContent("Поріг вологості: <input type='number' name='humidityThreshold' value='" + String(humidityThreshold) + "'> %<br>");
   server.sendContent("<input type='submit' value='Оновити'>");
   server.sendContent("</form>");
+  server.sendContent("<h2>Інформація</h2>");
+  server.sendContent("<ul>");
+  server.sendContent("<li>Освітлення вмикається, коли рівень освітленості нижчий за " + String(lightThreshold) + " lx.</li>");
+  server.sendContent("<li>Обігрів вмикається, коли температура нижча за " + String(tempThreshold) + " °C.</li>");
+  server.sendContent("<li>Вентиляція вмикається, коли вологість вища за " + String(humidityThreshold) + " %.</li>");
+  server.sendContent("<li>Полив вмикається, коли ґрунт сухий.</li>");
+  server.sendContent("</ul>");
   server.sendContent("</div>");
 
   server.sendContent("</div>");
@@ -247,10 +257,10 @@ void handleRoot() {
 
   server.sendContent("function updateStatus() {");
   server.sendContent("fetch('/status').then(response => response.json()).then(data => {");
-  server.sendContent("document.getElementById('lightLevel').innerText = data.lightLevel;");
+  server.sendContent("document.getElementById('lightLevel').innerText = data.lightLevel + ' lx';");
   server.sendContent("document.getElementById('soilMoisture').innerText = data.soilMoisture ? 'Сухий' : 'Вологий';");
-  server.sendContent("document.getElementById('temperature').innerText = data.temperature + '°C';");
-  server.sendContent("document.getElementById('humidity').innerText = data.humidity + '%';");
+  server.sendContent("document.getElementById('temperature').innerText = data.temperature + ' °C';");
+  server.sendContent("document.getElementById('humidity').innerText = data.humidity + ' %';");
   server.sendContent("document.getElementById('relay1').innerText = data.relay1 ? 'Увімкнено' : 'Вимкнено';");
   server.sendContent("document.getElementById('relay2').innerText = data.relay2 ? 'Увімкнено' : 'Вимкнено';");
   server.sendContent("document.getElementById('relay3').innerText = data.relay3 ? 'Увімкнено' : 'Вимкнено';");
@@ -276,6 +286,7 @@ void handleRoot() {
 
   server.sendContent("setInterval(updateStatus, 2000);");
   server.sendContent("updateStatus();");
+
   server.sendContent("</script>");
   server.sendContent("</body></html>");
   server.client().stop();
